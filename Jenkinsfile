@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -9,44 +8,63 @@ pipeline {
 
     environment {
         NEXUS_URL = 'http://local-nexus:8081'
-        DOCKER_REGISTRY = 'localhost:8082'
-        IMAGE_NAME = 'docker-nexus-demo'
-        IMAGE_TAG = '1.0.1'
-        NEXUS_CREDENTIALS = 'nexus-credentials'
-        DOCKER_CREDENTIALS = 'nexus-docker-credentials'
+        IMAGE = 'docker-nexus-demo'
+        VERSION = '1.0.2'
+        REGISTRY = 'host.docker.internal:8082'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Using the current Jenkins workspace source code'
+                checkout scm
             }
         }
 
         stage('Build JAR') {
             steps {
-                bat 'mvn clean package'
+                sh 'mvn clean package'
             }
         }
 
         stage('Upload JAR to Nexus') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: "${NEXUS_CREDENTIALS}",
-                    usernameVariable: 'NEXUS_USER',
-                    passwordVariable: 'NEXUS_PASS'
+                    credentialsId: 'nexus-credentials',
+                    usernameVariable: 'NX_USER',
+                    passwordVariable: 'NX_PASS'
                 )]) {
-                    bat '''
-                        mvn deploy:deploy-file ^
-                        "-DgroupId=com.devops" ^
-                        "-DartifactId=docker-nexus-demo" ^
-                        "-Dversion=1.0.1" ^
-                        "-Dpackaging=jar" ^
-                        "-Dfile=target\\docker-nexus-demo-1.0.1.jar" ^
-                        "-DrepositoryId=nexus-releases" ^
-                        "-Durl=http://local-nexus:8081/repository/maven-releases/" ^
-                        "-DgeneratePom=true" ^
-                        "-DrepositoryLayout=default"
+                    script {
+                        def xmlEscape = { s ->
+                            s.replace('&', '&amp;')
+                             .replace('<', '&lt;')
+                             .replace('>', '&gt;')
+                             .replace('"', '&quot;')
+                             .replace("'", '&apos;')
+                        }
+
+                        writeFile file: 'settings.xml', text: """
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+  <servers>
+    <server>
+      <id>nexus-releases</id>
+      <username>${xmlEscape(env.NX_USER)}</username>
+      <password>${xmlEscape(env.NX_PASS)}</password>
+    </server>
+  </servers>
+</settings>
+"""
+                    }
+
+                    sh '''
+                        mvn -s settings.xml deploy:deploy-file \
+                          -DgroupId=com.devops \
+                          -DartifactId=docker-nexus-demo \
+                          -Dversion=${VERSION} \
+                          -Dpackaging=jar \
+                          -Dfile=target/docker-nexus-demo-${VERSION}.jar \
+                          -DrepositoryId=nexus-releases \
+                          -Durl=${NEXUS_URL}/repository/maven-releases/ \
+                          -DgeneratePom=true
                     '''
                 }
             }
@@ -54,34 +72,41 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                bat 'docker build -t docker-nexus-demo:1.0.1 .'
-                bat 'docker tag docker-nexus-demo:1.0.1 localhost:8082/docker-releases/docker-nexus-demo:1.0.1'
+                sh 'docker build -t ${IMAGE}:${VERSION} .'
+                sh 'docker tag ${IMAGE}:${VERSION} ${REGISTRY}/docker-releases/${IMAGE}:${VERSION}'
             }
         }
 
         stage('Push Image to Nexus') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CREDENTIALS}",
-                    usernameVariable: 'REGISTRY_USER',
-                    passwordVariable: 'REGISTRY_PASS'
+                    credentialsId: 'nexus-docker-credentials',
+                    usernameVariable: 'NX_DOCKER_USER',
+                    passwordVariable: 'NX_DOCKER_PASS'
                 )]) {
-                    bat '''
-                        docker login %DOCKER_REGISTRY% -u "%REGISTRY_USER%" --password-stdin < NUL
+                    sh '''
+                        set +x
+                        printf '%s' "$NX_DOCKER_PASS" |
+                          docker login "$REGISTRY" \
+                            -u "$NX_DOCKER_USER" --password-stdin
                     '''
                 }
-                bat 'docker push localhost:8082/docker-releases/docker-nexus-demo:1.0.1'
+
+                sh 'docker push ${REGISTRY}/docker-releases/${IMAGE}:${VERSION}'
             }
         }
 
         stage('Verify Container') {
             steps {
-                bat 'docker run --rm localhost:8082/docker-releases/docker-nexus-demo:1.0.1'
+                sh 'docker run --rm ${REGISTRY}/docker-releases/${IMAGE}:${VERSION}'
             }
         }
     }
 
     post {
+        always {
+            sh 'rm -f settings.xml'
+        }
         success {
             echo 'CI/CD PIPELINE SUCCESS!'
         }
