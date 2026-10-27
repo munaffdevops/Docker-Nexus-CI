@@ -9,7 +9,7 @@ pipeline {
     environment {
         NEXUS_URL = 'http://local-nexus:8081'
         IMAGE = 'docker-nexus-demo'
-        VERSION = '1.0.2'
+        VERSION = '1.0.3'
         REGISTRY = 'host.docker.internal:8082'
     }
 
