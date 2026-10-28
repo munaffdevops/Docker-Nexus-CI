@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -33,37 +34,35 @@ pipeline {
                     usernameVariable: 'NX_USER',
                     passwordVariable: 'NX_PASS'
                 )]) {
-                    script {
-                        def xmlEscape = { s ->
-                            s.replace('&', '&amp;')
-                             .replace('<', '&lt;')
-                             .replace('>', '&gt;')
-                             .replace('"', '&quot;')
-                             .replace("'", '&apos;')
-                        }
+                    sh '''
+                        set +x
+                        python3 - <<'PY'
+import os
+from xml.sax.saxutils import escape
 
-                        writeFile file: 'settings.xml', text: """
-<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+username = escape(os.environ["NX_USER"])
+password = escape(os.environ["NX_PASS"])
+
+with open("settings.xml", "w") as f:
+    f.write("""<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
   <servers>
     <server>
       <id>nexus-releases</id>
-      <username>${xmlEscape(env.NX_USER)}</username>
-      <password>${xmlEscape(env.NX_PASS)}</password>
+      <username>""" + username + """</username>
+      <password>""" + password + """</password>
     </server>
   </servers>
 </settings>
-"""
-                    }
-
-                    sh '''
+""")
+PY
                         mvn -s settings.xml deploy:deploy-file \
                           -DgroupId=com.devops \
                           -DartifactId=docker-nexus-demo \
-                          -Dversion=${VERSION} \
+                          -Dversion="$VERSION" \
                           -Dpackaging=jar \
-                          -Dfile=target/docker-nexus-demo-${VERSION}.jar \
+                          -Dfile="target/docker-nexus-demo-${VERSION}.jar" \
                           -DrepositoryId=nexus-releases \
-                          -Durl=${NEXUS_URL}/repository/maven-releases/ \
+                          -Durl="${NEXUS_URL}/repository/maven-releases/" \
                           -DgeneratePom=true
                     '''
                 }
