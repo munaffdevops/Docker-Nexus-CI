@@ -1,4 +1,5 @@
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-COPY target/docker-nexus-demo-1.0.4.jar app.jar
+ARG VERSION=1.0.5
+COPY target/docker-nexus-demo-${VERSION}.jar app.jar
 CMD ["java", "-jar", "app.jar"]
